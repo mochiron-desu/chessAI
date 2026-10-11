@@ -123,7 +123,7 @@ def run_ingestion_pipeline(
 
             total_scanned += 1
 
-            if not filter_game(game.headers):
+            if not filter_game(game.headers, min_elo=cfg.min_elo):
                 filtered_out += 1
                 continue
 

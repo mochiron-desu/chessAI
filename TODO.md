@@ -56,6 +56,7 @@ For empirical results, configurations, and metrics, see [ACHIEVEMENTS.md](file:/
 - [x] **DONE-11: Search Correctness Hardening & Metric Resolution** (Completed 2026-10-11, Milestone M9 in ACHIEVEMENTS.md; TT halfmove clock, repetition taint isolation, mate-score ply normalization, 50 tests passing; raw illegal-rate mathematically and empirically proved)
 - [x] **DONE-12: Stockfish 16 Calibration Ladder Benchmark Pilot** (Completed 2026-10-11, Milestone M10 in ACHIEVEMENTS.md; 16 configurations, 192 paired games, verified node limits 200-2000, zero illegal moves)
 - [x] **DONE-13: Quality-Filtered Dataset Pipeline & Empirical Comparison** (Completed 2026-10-11, Milestone M11 in ACHIEVEMENTS.md; 41.9k evaluated, 25k kept, 40.4% blunder rejection rate; proved predictive accuracy gain [+1.68% test Top-1] does not imply playing strength gain [-70.4 ± 122.9 Elo])
+- [x] **DONE-14: Colab Notebook Synchronization & Interface Alignment** (Completed 2026-10-11, Milestone M12 in ACHIEVEMENTS.md; fixed min_elo argument in stream_parser & pipeline, phantom ChessEvaluator, UCIEngine initialization, and total_evaluated puzzle keys)
 
 ---
 
@@ -65,6 +66,7 @@ For empirical results, configurations, and metrics, see [ACHIEVEMENTS.md](file:/
    - `DONE-11` (M9): TT correctness fixes (halfmove clock in key, repetition taint exclusion, mate-score ply shifting, 50 unit tests passing in `tests/test_search.py`). Empirical resolution of raw unmasked illegal rate in `data/verify_illegal_metric.json`.
    - `DONE-12` (M10): Stockfish 16 local setup (`tools/stockfish16/stockfish`) and 192-game pilot calibration ladder across 16 matrix cells (`data/calibration/pilot_d{0,1,2,3}_sf{200,500,1000,2000}.json`). Node limits verified (200, 500, 1000, 2000). 0 illegal moves recorded.
    - `DONE-13` (M11): Quality-filtered streaming pipeline (`scripts/run_filtered_pipeline.py`). Evaluated 41,979 positions with Stockfish 16 (nodes=500, ~2.8 ms/pos); filtered blunders >25 cp (40.4% rejection rate); generated `data/shards/train_filtered_25k.bin`. Completed controlled comparison (Raw 25k vs Filtered 25k) across test.bin (+1.68% Top-1 for Filtered), tactical puzzles (+0.2% Top-1, +2.5% Top-3), and head-to-head match (40.0% score, -70.4 ± 122.9 Elo).
+   - `DONE-14` (M12): Resolved all Colab notebook signature mismatches, phantom imports, and key errors across `colab/generate_data.ipynb` and `colab/train_gpu.ipynb`. All 50 tests passing.
 2. **Current model checkpoints**:
    - 1M baseline: `checkpoints/run_1m/final_ema_model.pt`.
    - Filtered 25k: `checkpoints/filtered_25k/best_model.pt`.

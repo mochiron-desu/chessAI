@@ -25,16 +25,19 @@ class UCIEngine:
         checkpoint_path: Optional[str] = None,
         device: str = "cpu",
         search_depth: int = 0,
+        model: Optional[ChessResNet] = None,
     ):
         self.device = torch.device(device)
-        self.model = ChessResNet(num_blocks=6, channels=64).to(self.device)
         self.search_depth = search_depth
-
-        if checkpoint_path and os.path.exists(checkpoint_path):
-            ckpt = torch.load(checkpoint_path, map_location=self.device)
-            state_dict = ckpt["model_state"] if "model_state" in ckpt else ckpt
-            self.model.load_state_dict(state_dict)
-            self.model.eval()
+        if model is not None:
+            self.model = model.to(self.device)
+        else:
+            self.model = ChessResNet(num_blocks=6, channels=64).to(self.device)
+            if checkpoint_path and os.path.exists(checkpoint_path):
+                ckpt = torch.load(checkpoint_path, map_location=self.device)
+                state_dict = ckpt["model_state"] if "model_state" in ckpt else ckpt
+                self.model.load_state_dict(state_dict)
+                self.model.eval()
 
         self.board = chess.Board()
         self.searcher = (

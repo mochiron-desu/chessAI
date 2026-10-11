@@ -110,6 +110,7 @@ def evaluate_puzzles(
     return {
         "search_depth": search_depth,
         "total_evaluated": total,
+        "total": total,
         "top1_accuracy": correct_top1 / max(1, total),
         "top3_accuracy": correct_top3 / max(1, total),
         "top5_accuracy": correct_top5 / max(1, total),

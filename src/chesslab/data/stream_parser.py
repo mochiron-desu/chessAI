@@ -91,7 +91,7 @@ def encode_position_to_record(
     return record
 
 
-def filter_game(headers: chess.pgn.Headers) -> bool:
+def filter_game(headers: chess.pgn.Headers, min_elo: int = 1500) -> bool:
     """Evaluates if a game meets the PRD quality filters."""
     # Standard chess only
     variant = headers.get("Variant", "Standard")
@@ -103,11 +103,11 @@ def filter_game(headers: chess.pgn.Headers) -> bool:
     if not ("blitz" in event or "rapid" in event):
         return False
 
-    # Minimum Elo >= 1500 for both players
+    # Minimum Elo threshold for both players
     try:
         white_elo = int(headers.get("WhiteElo", "0"))
         black_elo = int(headers.get("BlackElo", "0"))
-        if white_elo < 1500 or black_elo < 1500:
+        if white_elo < min_elo or black_elo < min_elo:
             return False
     except ValueError:
         return False

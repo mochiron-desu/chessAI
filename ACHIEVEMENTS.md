@@ -226,6 +226,24 @@ This document tracks all completed experiments, empirical benchmarks, architectu
 
 ---
 
+### Milestone 12: Colab Notebook Synchronization & Interface Alignment
+- **Date**: 2026-10-11
+- **Status**: Completed
+- **Motivation & Root Cause Analysis**:
+  - `colab/generate_data.ipynb` crashed with `TypeError: filter_game() got an unexpected keyword argument 'min_elo'` during streaming ingestion because `filter_game` in `src/chesslab/data/stream_parser.py` hardcoded 1500 Elo without accepting `min_elo`, and `pipeline.py` ignored `cfg.min_elo`.
+  - `colab/train_gpu.ipynb` contained a phantom import `from chesslab.inference.eval_interface import ChessEvaluator`, passed invalid argument `evaluator` to `UCIEngine.__init__`, accessed `puzzle_results['total']` instead of `'total_evaluated'`, and missed repository root on `sys.path`.
+- **Engineering Changes & Evidence**:
+  - `src/chesslab/data/stream_parser.py`: Updated `filter_game(headers, min_elo=1500)` to accept configurable threshold.
+  - `src/chesslab/data/pipeline.py`: Forwarded `min_elo=cfg.min_elo` to `filter_game`.
+  - `src/chesslab/inference/engine_uci.py`: Updated `UCIEngine.__init__` to accept `model: Optional[ChessResNet] = None`.
+  - `scripts/eval_puzzles.py`: Added `"total"` key alongside `"total_evaluated"` in benchmark return dictionary.
+  - `scripts/__init__.py`: Created package marker.
+  - `colab/generate_data.ipynb`: Added `check_game_filter` backwards-compatible fallback and added repository root to `sys.path`.
+  - `colab/train_gpu.ipynb`: Removed `ChessEvaluator`, updated `UCIEngine` instantiation with `model=model`, handled `total_evaluated`, and added repository root to `sys.path`.
+  - Unit tests: 50 passed in 161.4s, including newly added custom `min_elo` test assertions.
+
+---
+
 ## Active Status & Next Steps
 
 | Milestone / Experiment | Priority | Description | Status |
@@ -234,5 +252,7 @@ This document tracks all completed experiments, empirical benchmarks, architectu
 | **M9: Search Hardening & Metric Resolution** | High | Fixed TT halfmove/repetition/mate bugs (50 tests passing); resolved raw illegal rate | Completed |
 | **M10: Stockfish 16 Calibration Ladder** | High | 192-game pilot benchmark against Stockfish 16 (200-2000 nodes); verified node limits | Completed |
 | **M11: Engine Blunder Filtering (Quality Gate)** | High | Streamed 25k blunder-filtered shard ($\le 25$ cp); proved predictive gain does not imply playing strength gain | Completed |
-| **M12: Data Scaling Curve (1M vs 3M vs 10M)** | High | Compare whether scaling dataset from 1M to 3M games produces measurable playing strength gains | Next Action |
+| **M12: Colab Notebook Synchronization** | High | Resolved all signature mismatches, phantom imports, and filter arguments across Colabs | Completed |
+| **M13: Data Scaling Curve (1M vs 3M vs 10M)** | High | Compare whether scaling dataset from 1M to 3M games produces measurable playing strength gains | Next Action |
+
 

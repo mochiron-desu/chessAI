@@ -48,10 +48,14 @@ def test_filter_game_rules():
     h_bullet["Event"] = "Rated Bullet game"
     assert filter_game(h_bullet) is False
 
-    # Low rating -> False
+    # Low rating -> False (default min_elo=1500)
     h_low = h_valid.copy()
     h_low["WhiteElo"] = "1400"
     assert filter_game(h_low) is False
+    # Custom min_elo allows lower threshold if specified
+    assert filter_game(h_low, min_elo=1300) is True
+    # Custom min_elo rejects if higher threshold specified
+    assert filter_game(h_valid, min_elo=1900) is False
 
 
 def test_sample_game_position():
