@@ -23,16 +23,18 @@ def main():
     parser = argparse.ArgumentParser(description="Run head-to-head chess engine match")
     parser.add_argument("--engine-a-ckpt", type=str, default="", help="Checkpoint path for Engine A")
     parser.add_argument("--engine-b-ckpt", type=str, default="", help="Checkpoint path for Engine B (empty = random init)")
+    parser.add_argument("--search-depth-a", "--depth-a", dest="depth_a", type=int, default=0, help="Search depth for Engine A (0 = searchless policy)")
+    parser.add_argument("--search-depth-b", "--depth-b", dest="depth_b", type=int, default=0, help="Search depth for Engine B (0 = searchless policy)")
     parser.add_argument("--pairs", type=int, default=5, help="Number of opening pairs (each pair = 2 games with swapped colors)")
     parser.add_argument("--max-plies", type=int, default=100, help="Maximum plies per game")
     parser.add_argument("--output", type=str, default="data/tournament_results.json", help="Output JSON path")
     args = parser.parse_args()
 
-    print(f"Initializing Engine A: {args.engine_a_ckpt or 'random weights'}")
-    engine_a = UCIEngine(checkpoint_path=args.engine_a_ckpt or None, device="cpu")
+    print(f"Initializing Engine A: {args.engine_a_ckpt or 'random weights'} (Search Depth: {args.depth_a})")
+    engine_a = UCIEngine(checkpoint_path=args.engine_a_ckpt or None, device="cpu", search_depth=args.depth_a)
 
-    print(f"Initializing Engine B: {args.engine_b_ckpt or 'random weights'}")
-    engine_b = UCIEngine(checkpoint_path=args.engine_b_ckpt or None, device="cpu")
+    print(f"Initializing Engine B: {args.engine_b_ckpt or 'random weights'} (Search Depth: {args.depth_b})")
+    engine_b = UCIEngine(checkpoint_path=args.engine_b_ckpt or None, device="cpu", search_depth=args.depth_b)
 
     # Select opening pairs
     openings = (STANDARD_OPENINGS * (args.pairs // len(STANDARD_OPENINGS) + 1))[:args.pairs]

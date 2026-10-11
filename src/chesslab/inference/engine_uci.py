@@ -14,14 +14,21 @@ from chesslab.models.resnet import ChessResNet
 from chesslab.encode.board_planes import encode_board
 from chesslab.inference.legal_mask import compute_legal_mask, sample_legal_move
 from chesslab.encode.move_vocab import decode_move
+from chesslab.search.minimax import AlphaBetaSearcher
 
 
 class UCIEngine:
     """Wraps ChessResNet in the standard UCI engine protocol."""
 
-    def __init__(self, checkpoint_path: Optional[str] = None, device: str = "cpu"):
+    def __init__(
+        self,
+        checkpoint_path: Optional[str] = None,
+        device: str = "cpu",
+        search_depth: int = 0,
+    ):
         self.device = torch.device(device)
         self.model = ChessResNet(num_blocks=6, channels=64).to(self.device)
+        self.search_depth = search_depth
 
         if checkpoint_path and os.path.exists(checkpoint_path):
             ckpt = torch.load(checkpoint_path, map_location=self.device)
@@ -30,11 +37,22 @@ class UCIEngine:
             self.model.eval()
 
         self.board = chess.Board()
+        self.searcher = (
+            AlphaBetaSearcher(self.model, device=self.device, max_depth=self.search_depth)
+            if self.search_depth > 0
+            else None
+        )
 
     def select_best_move(self, temperature: float = 0.05) -> chess.Move:
         """Selects the best legal move for the current position."""
         if self.board.is_game_over() or len(list(self.board.legal_moves)) == 0:
             return chess.Move.null()
+
+        # If search is enabled and temperature is deterministic, use alpha-beta search
+        if self.search_depth > 0 and temperature < 1e-3 and self.searcher is not None:
+            best_move, _, _ = self.searcher.search_root(self.board, depth=self.search_depth)
+            if best_move in self.board.legal_moves:
+                return best_move
 
         planes_np, rule_np = encode_board(self.board)
         mask_np = compute_legal_mask(self.board)
@@ -90,8 +108,33 @@ class UCIEngine:
                     for mv_str in tokens[idx + 1:]:
                         self.board.push_uci(mv_str)
 
+        elif cmd == "setoption":
+            # e.g., setoption name SearchDepth value 2
+            if len(tokens) >= 5 and tokens[1] == "name" and tokens[2].lower() == "searchdepth" and tokens[3] == "value":
+                try:
+                    self.search_depth = int(tokens[4])
+                    self.searcher = (
+                        AlphaBetaSearcher(self.model, device=self.device, max_depth=self.search_depth)
+                        if self.search_depth > 0
+                        else None
+                    )
+                except ValueError:
+                    pass
+
         elif cmd == "go":
-            best_move = self.select_best_move(temperature=0.0)
+            # Optional go depth N
+            depth = self.search_depth
+            if len(tokens) >= 3 and tokens[1] == "depth":
+                try:
+                    depth = int(tokens[2])
+                except ValueError:
+                    pass
+
+            if depth > 0 and self.searcher is not None:
+                best_move, _, _ = self.searcher.search_root(self.board, depth=depth)
+            else:
+                best_move = self.select_best_move(temperature=0.0)
+
             print(f"bestmove {best_move.uci()}")
             sys.stdout.flush()
 
@@ -104,9 +147,14 @@ def main():
     parser = argparse.ArgumentParser(description="UCI interface for ChessLab model")
     parser.add_argument("--checkpoint", type=str, default="", help="Path to model checkpoint")
     parser.add_argument("--device", type=str, default="cpu", help="Device (cpu or cuda)")
+    parser.add_argument("--search-depth", type=int, default=0, help="Alpha-Beta search depth (0 = searchless policy)")
     args = parser.parse_args()
 
-    engine = UCIEngine(checkpoint_path=args.checkpoint or None, device=args.device)
+    engine = UCIEngine(
+        checkpoint_path=args.checkpoint or None,
+        device=args.device,
+        search_depth=args.search_depth
+    )
 
     for line in sys.stdin:
         engine.handle_line(line)

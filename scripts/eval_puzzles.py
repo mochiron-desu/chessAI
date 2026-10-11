@@ -21,7 +21,8 @@ from chesslab.encode.move_vocab import decode_move, encode_move
 def evaluate_puzzles(
     engine: UCIEngine,
     csv_path: str = "data/benchmarks/puzzles_1k.csv",
-    max_puzzles: int = 1000
+    max_puzzles: int = 1000,
+    search_depth: int = 0,
 ) -> Dict[str, Any]:
     total = 0
     correct_top1 = 0
@@ -58,24 +59,31 @@ def evaluate_puzzles(
             if solution_move not in board.legal_moves:
                 continue
 
-            # Encode position from player's perspective
-            planes_np, rule_np = encode_board(board)
-            mask_np = compute_legal_mask(board)
+            if search_depth > 0:
+                engine.board = board.copy()
+                pred_move = engine.select_best_move(temperature=0.0)
+                is_top1 = (pred_move == solution_move)
+                is_top3 = is_top1
+                is_top5 = is_top1
+            else:
+                # Searchless policy evaluation
+                planes_np, rule_np = encode_board(board)
+                mask_np = compute_legal_mask(board)
 
-            planes_t = torch.from_numpy(planes_np).unsqueeze(0).to(engine.device)
-            rule_t = torch.from_numpy(rule_np).unsqueeze(0).to(engine.device)
-            mask_t = torch.from_numpy(mask_np).to(engine.device)
+                planes_t = torch.from_numpy(planes_np).unsqueeze(0).to(engine.device)
+                rule_t = torch.from_numpy(rule_np).unsqueeze(0).to(engine.device)
+                mask_t = torch.from_numpy(mask_np).to(engine.device)
 
-            with torch.no_grad():
-                pol_logits, _ = engine.model(planes_t, rule_t)
-                masked_pol = mask_logits(pol_logits, mask_t)
-                topk = torch.topk(masked_pol.squeeze(0), k=min(5, len(list(board.legal_moves))))
+                with torch.no_grad():
+                    pol_logits, _ = engine.model(planes_t, rule_t)
+                    masked_pol = mask_logits(pol_logits, mask_t)
+                    topk = torch.topk(masked_pol.squeeze(0), k=min(5, len(list(board.legal_moves))))
 
-            pred_moves = [decode_move(idx.item(), board.turn) for idx in topk.indices]
+                pred_moves = [decode_move(idx.item(), board.turn) for idx in topk.indices]
 
-            is_top1 = (pred_moves[0] == solution_move)
-            is_top3 = solution_move in pred_moves[:3]
-            is_top5 = solution_move in pred_moves[:5]
+                is_top1 = (pred_moves[0] == solution_move)
+                is_top3 = solution_move in pred_moves[:3]
+                is_top5 = solution_move in pred_moves[:5]
 
             total += 1
             if is_top1:
@@ -100,6 +108,7 @@ def evaluate_puzzles(
                     by_theme[th][0] += 1
 
     return {
+        "search_depth": search_depth,
         "total_evaluated": total,
         "top1_accuracy": correct_top1 / max(1, total),
         "top3_accuracy": correct_top3 / max(1, total),
@@ -119,19 +128,24 @@ def main():
     parser.add_argument("--checkpoint", type=str, default="checkpoints/run_1m/final_ema_model.pt")
     parser.add_argument("--puzzles", type=str, default="data/benchmarks/puzzles_1k.csv")
     parser.add_argument("--max-puzzles", type=int, default=1000)
+    parser.add_argument("--search-depth", type=int, default=0, help="Search depth (0 = searchless policy)")
     args = parser.parse_args()
 
-    engine = UCIEngine(checkpoint_path=args.checkpoint, device="cpu")
-    print(f"Loaded checkpoint: {args.checkpoint}")
+    engine = UCIEngine(checkpoint_path=args.checkpoint, device="cpu", search_depth=args.search_depth)
+    print(f"Loaded checkpoint: {args.checkpoint} (Search Depth: {args.search_depth})")
     print(f"Evaluating on {args.max_puzzles} tactical puzzles from {args.puzzles}...")
 
-    results = evaluate_puzzles(engine, csv_path=args.puzzles, max_puzzles=args.max_puzzles)
+    results = evaluate_puzzles(
+        engine, csv_path=args.puzzles, max_puzzles=args.max_puzzles, search_depth=args.search_depth
+    )
 
     print("\n=== Tactical Puzzle Benchmark Results ===")
+    print(f"Search Depth: {results['search_depth']}")
     print(f"Total Puzzles: {results['total_evaluated']}")
     print(f"Top-1 Solution Accuracy: {results['top1_accuracy']*100:.2f}%")
-    print(f"Top-3 Solution Accuracy: {results['top3_accuracy']*100:.2f}%")
-    print(f"Top-5 Solution Accuracy: {results['top5_accuracy']*100:.2f}%")
+    if args.search_depth == 0:
+        print(f"Top-3 Solution Accuracy: {results['top3_accuracy']*100:.2f}%")
+        print(f"Top-5 Solution Accuracy: {results['top5_accuracy']*100:.2f}%")
 
     print("\nAccuracy by Rating Tier:")
     for tier, (acc, count) in results["by_rating"].items():
