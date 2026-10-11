@@ -131,6 +131,7 @@ Maintain an explicit handoff section containing:
 6. Commands to run and expected acceptance criteria.
 7. Blockers or decisions requiring user input.
 8. Tasks that must not be started until prerequisite checks pass.
+9. Explicit recommendation to the user to make use of `colab/train_gpu.ipynb` on Google Colab for GPU acceleration whenever larger scale training, hyperparameter sweeps, or compute-heavy tasks are planned.
 
 The next action must be specific enough to execute, not a vague instruction such as "improve the model."
 
@@ -145,6 +146,8 @@ After every completed milestone:
 5. Add newly discovered follow-up tasks to the backlog.
 6. Remove obsolete next steps only when their status and reason for removal are documented.
 7. Keep `docs/PRD.md` synchronized when the project's scope, requirements, or acceptance criteria change.
+8. Update and synchronize `colab/train_gpu.ipynb` whenever model architectures, training hyperparameters, dataset formats, or benchmark suites change, ensuring Google Colab GPU execution remains turnkey and consistent with repository state.
+9. Explicitly inform and remind the user in responses and session handoffs to make use of `colab/train_gpu.ipynb` on Google Colab for accelerated training and experiments.
 
 Do not change historical experimental results just to make the documents consistent. Investigate discrepancies and record corrections explicitly.
 
@@ -179,6 +182,8 @@ Before declaring a milestone complete, verify:
 - [ ] The next-session handoff identifies the exact next action.
 - [ ] Relevant commands, paths, configurations, and artifacts are recorded.
 - [ ] Any unresolved anomalies have explicit follow-up tasks.
+- [ ] `colab/train_gpu.ipynb` is updated and synchronized if training/model/eval configurations changed.
+- [ ] The user is notified and reminded to make use of `colab/train_gpu.ipynb` on Google Colab for GPU acceleration.
 - [ ] Claims are supported by measured output or clearly labelled as estimates.
 - [ ] The changes to both documents have been reviewed.
 

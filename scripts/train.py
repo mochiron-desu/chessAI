@@ -25,17 +25,25 @@ def main():
     parser.add_argument("--blocks", type=int, default=6, help="Number of residual blocks")
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints", help="Checkpoints output directory")
     parser.add_argument("--eval-every", type=int, default=500, help="Evaluate every N steps")
+    parser.add_argument("--train-shard", type=str, default="", help="Path to training shard (overrides --data-dir)")
+    parser.add_argument("--val-shard", type=str, default="", help="Path to val shard (overrides --data-dir)")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for model init and data shuffling")
     parser.add_argument("--num-threads", type=int, default=8, help="PyTorch CPU intra-op threads")
     args = parser.parse_args()
 
+    import random
+    import numpy as np
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
     torch.set_num_threads(args.num_threads)
     device = torch.device("cpu")
 
-    train_path = os.path.join(args.data_dir, "train.bin")
-    val_path = os.path.join(args.data_dir, "val.bin")
+    train_path = args.train_shard if args.train_shard else os.path.join(args.data_dir, "train.bin")
+    val_path = args.val_shard if args.val_shard else os.path.join(args.data_dir, "val.bin")
 
     if not os.path.exists(train_path):
-        print(f"Error: {train_path} does not exist. Run scripts/run_1m_pipeline.py first!")
+        print(f"Error: {train_path} does not exist!")
         return
 
     print(f"Loading training shard from {train_path}...")

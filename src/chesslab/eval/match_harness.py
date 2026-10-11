@@ -15,12 +15,52 @@ import time
 import numpy as np
 
 
+class StockfishEngine:
+    """External UCI engine (Stockfish) with a fixed node budget, same interface as UCIEngine.
+
+    The node limit is sent as `go nodes N` to Stockfish only. `last_nodes` holds the actual
+    node count Stockfish reported for the most recent move (it may slightly exceed N).
+    """
+
+    def __init__(self, binary_path: str, nodes: int, hash_mb: int = 16, threads: int = 1):
+        import chess.engine
+        self._chess_engine = chess.engine
+        self.binary_path = binary_path
+        self.nodes = nodes
+        self.engine = chess.engine.SimpleEngine.popen_uci(binary_path)
+        self.engine.configure({"Threads": threads, "Hash": hash_mb})
+        self.board = chess.Board()
+        self.searcher = None
+        self.last_nodes = 0
+        self._game_token = object()
+        self.version = self.engine.id.get("name", "unknown")
+
+    def new_game(self):
+        self._game_token = object()  # python-chess sends ucinewgame when token changes
+
+    def select_best_move(self, temperature: float = 0.0) -> chess.Move:
+        if self.board.is_game_over():
+            return chess.Move.null()
+        res = self.engine.play(
+            self.board,
+            self._chess_engine.Limit(nodes=self.nodes),
+            info=self._chess_engine.INFO_BASIC,
+            game=self._game_token,
+        )
+        self.last_nodes = int(res.info.get("nodes", 0))
+        return res.move if res.move is not None else chess.Move.null()
+
+    def close(self):
+        self.engine.quit()
+
+
 def play_game(
     white_engine: UCIEngine,
     black_engine: UCIEngine,
     opening_moves: Optional[List[chess.Move]] = None,
     max_plies: int = 150,
     perf_stats: Optional[Dict[str, Any]] = None,
+    record: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Plays a single game between two UCIEngines with latency and node profiling.
     
@@ -42,6 +82,16 @@ def play_game(
     if getattr(black_engine, "searcher", None) is not None:
         black_engine.searcher.clear_caches()
 
+    for e in (white_engine, black_engine):
+        if hasattr(e, "new_game"):
+            e.new_game()
+
+    def _finish(result: str, reason: str, illegal_by: Optional[str] = None) -> str:
+        if record is not None:
+            record.update({"result": result, "termination": reason, "plies": len(board.move_stack),
+                           "illegal_by": illegal_by})
+        return result
+
     while not board.is_game_over() and len(board.move_stack) < max_plies:
         turn = board.turn
         curr_engine = white_engine if turn == chess.WHITE else black_engine
@@ -57,22 +107,57 @@ def play_game(
             if searcher is not None:
                 perf_stats[f"nodes_{engine_key}"].append(searcher.nodes_visited)
                 perf_stats[f"nn_evals_{engine_key}"].append(searcher.nn_evals)
+            elif hasattr(curr_engine, "last_nodes"):
+                perf_stats[f"nodes_{engine_key}"].append(curr_engine.last_nodes)
+                perf_stats[f"nn_evals_{engine_key}"].append(0)
             else:
                 perf_stats[f"nodes_{engine_key}"].append(1)
                 perf_stats[f"nn_evals_{engine_key}"].append(1)
 
         if move == chess.Move.null() or move not in board.legal_moves:
             # Forfeit if illegal or null
-            return "0-1" if turn == chess.WHITE else "1-0"
+            res = "0-1" if turn == chess.WHITE else "1-0"
+            return _finish(res, "illegal_move", engine_key)
 
         board.push(move)
         white_engine.board.push(move)
         black_engine.board.push(move)
 
     if board.is_checkmate():
-        return "0-1" if board.turn == chess.WHITE else "1-0"
-    else:
-        return "1/2-1/2"
+        return _finish("0-1" if board.turn == chess.WHITE else "1-0", "checkmate")
+    if board.is_game_over():
+        return _finish("1/2-1/2", "draw_rule:" + str(board.outcome().termination.name))
+    return _finish("1/2-1/2", "max_plies_adjudicated_draw")
+
+
+def compute_paired_elo(pair_scores: List[float], z: float = 1.96) -> Dict[str, Any]:
+    """Elo estimate with CI from per-pair scores (each in {0,.25,.5,.75,1}) via normal approx.
+
+    Pairs (same opening, colors swapped) are the sampling unit. Score bounds are clamped away
+    from 0/1 by 1/(2*games) so extreme results give a finite but flagged (saturated) interval.
+    This is a rough interval, not BayesElo; with few pairs it is unreliable.
+    """
+    n = len(pair_scores)
+    if n == 0:
+        return {}
+    mean = sum(pair_scores) / n
+    var = sum((x - mean) ** 2 for x in pair_scores) / (n - 1) if n > 1 else 0.25
+    se = math.sqrt(var / n)
+    eps = 1.0 / (4.0 * n)
+
+    def elo(s: float) -> float:
+        s = min(1.0 - eps, max(eps, s))
+        return -400.0 * math.log10(1.0 / s - 1.0)
+
+    return {
+        "pairs": n,
+        "score": mean,
+        "elo": elo(mean),
+        "elo_lo": elo(mean - z * se),
+        "elo_hi": elo(mean + z * se),
+        "saturated": mean <= 0.0 or mean >= 1.0,
+        "method": "paired normal approx, clamped; not BayesElo",
+    }
 
 
 def compute_elo_with_ci(wins: int, draws: int, losses: int) -> Dict[str, float]:

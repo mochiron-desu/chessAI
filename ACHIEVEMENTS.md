@@ -146,12 +146,93 @@ This document tracks all completed experiments, empirical benchmarks, architectu
 
 ---
 
+---
+
+### Milestone 9: Search Correctness Hardening & Illegal-Move Metric Empirical Resolution
+- **Date**: 2026-10-11
+- **Status**: Completed
+- **Search Defects Audited & Fixed**:
+  - **Transposition Table Fifty-Move Clock**: Added `board.halfmove_clock` to `get_position_key()` in `src/chesslab/search/minimax.py`. Prevents 50-move rule draws from cross-pollinating identical layouts with different clocks.
+  - **Path-Dependent Repetition Isolation**: Subtrees influenced by repetition draws (`is_repetition(2)` or `can_claim_threefold_repetition()`) tracked via `_rep_taint` and excluded from position-independent TT storage.
+  - **Mate Score Normalization**: Added `score_to_tt()` and `score_from_tt()` with ply adjustment (`MATE_PLY_PENALTY`) ensuring mate distance from root remains invariant across TT hits.
+  - **Root Claimable Draw Protection**: Root positions with claimable draws search legal replies rather than returning null move.
+  - **Regression Test Suite**: Added 12 new unit/regression tests to `tests/test_search.py`. Total test suite expanded from 38 to 50 tests; 100% passing (`50 passed in 122.45s`).
+- **Empirical Resolution of 100% Raw Unmasked Illegal-Move Rate** (`data/verify_illegal_metric.json`):
+  - **Mathematical Proof**: Loss is $\mathcal{L} = -\log \frac{\exp(z_{\text{target}})}{\sum_{m \in \mathcal{M}_{\text{legal}}} \exp(z_m)}$. Illegal moves masked to $-\infty$ receive strictly zero gradient: $\forall k \notin \mathcal{M}_{\text{legal}}, \frac{\partial \mathcal{L}}{\partial z_k} \equiv 0.0$.
+  - **Empirical Verification (E1)**: On 5,000 held-out test positions (`final_ema_model.pt`), mean legal logit is $-8.20$, while unsuppressed illegal logit reaches $+5.89$. Raw argmax illegal rate is 100.0%, masked argmax illegal rate is 0.0%.
+  - **Gradient Measurement (E2)**: Masked CE max absolute gradient on illegal logits is exactly $0.000000$. Full (unmasked) CE yields non-zero negative gradients.
+  - **Controlled Training (E3)**: Identical 400-step training from scratch. Masked CE yielded 98.38% raw illegal rate; unmasked CE dropped raw illegal rate to 17.40%.
+
+### Milestone 10: Stockfish 16 Calibration Ladder Benchmark (Pilot Matrix)
+- **Date**: 2026-10-11
+- **Status**: Completed
+- **Opponent Engine**: Stockfish 16 (NNUE `nn-5af11540bbfe.nnue`, 1 thread, 16 MB hash) installed locally at `tools/stockfish16/stockfish` (SHA-256: `00628bd9c9855c1b7ff93d7f8d51b413586cdc6336fe637f9a14a61531a05aca`).
+- **Protocol**: 16 matrix cells (ChessLab Depths 0, 1, 2, 3 vs Stockfish Node Budgets 200, 500, 1000, 2000). 6 opening pairs (12 games per cell, colors swapped, max 120 plies). 192 games played total.
+- **Node Budget Enforcement Verified**:
+  - Target 200 nodes: Stockfish mean actual nodes = 202.1 to 203.7.
+  - Target 500 nodes: Stockfish mean actual nodes = 500.6 to 501.5.
+  - Target 1000 nodes: Stockfish mean actual nodes = 1000.7 to 1001.2.
+  - Target 2000 nodes: Stockfish mean actual nodes = 2000.6 to 2001.5.
+  - Node limits isolated exclusively to Stockfish subprocess; ChessLab node/NN counts profiled independently.
+- **Results Matrix (12 Games per Cell)**:
+  | ChessLab Depth | SF 200 Nodes | SF 500 Nodes | SF 1000 Nodes | SF 2000 Nodes | Median Latency | Mean Nodes/Move |
+  |---|---|---|---|---|---|---|
+  | **Depth 0 (Searchless)** | 0.0% (0-0-12) | 0.0% (0-0-12) | 0.0% (0-0-12) | 0.0% (0-0-12) | 2.6 ms | 1.0 |
+  | **Depth 1 (Alpha-Beta)** | 0.0% (0-0-12) | 0.0% (0-0-12) | 0.0% (0-0-12) | 0.0% (0-0-12) | 53.8 ms | 22.2 |
+  | **Depth 2 (Alpha-Beta)** | 8.3% (0-2-10) | 4.2% (0-1-11) | 0.0% (0-0-12) | 0.0% (0-0-12) | 276.5 ms | 155.1 |
+  | **Depth 3 (Alpha-Beta)** | 4.2% (0-1-11) | 8.3% (0-2-10) | 0.0% (0-0-12) | 0.0% (0-0-12) | 2788.7 ms | 1516.4 |
+- **Key Findings & Evidence**:
+  - **Illegal Move Rate**: 0 illegal moves in 192 games (0.0%).
+  - **Engine Dominance**: Stockfish 16 NNUE even at 200–500 nodes severely outclasses raw imitation-trained ChessLab (P95+ win rate).
+  - **Resistance from Search**: Searchless and Depth 1 achieved 0 draws across all node budgets (0.0% score). Depths 2 and 3 achieved 6 draws total against 200 and 500 node Stockfish, showing tree search provides tactical resistance against shallow engine search.
+  - **Latency / Compute Profile**: Depth 3 requires ~2.8s per move on CPU (~10× Depth 2), establishing Depth 2 as the practical CPU sweet spot.
+
+---
+
+---
+
+### Milestone 11: Quality-Filtered Dataset Pipeline & Controlled Empirical Comparison
+- **Date**: 2026-10-11
+- **Status**: Completed
+- **Pipeline Implementation** (`scripts/run_filtered_pipeline.py`):
+  - Streaming from Lichess standard blitz/rapid archive; evaluated candidate positions with local Stockfish 16 at 500 nodes (~2.8 ms/pos).
+  - Calculated centipawn loss (CPL) strictly from moving player's perspective ($S$ before move vs $S'$ after move).
+  - Terminal checkmates scored $+10,000$ (0 CPL); draws scored $0.0$; mate scores normalized with `mate_score=10000`.
+  - Preserved strict split boundary via SHA-256 game hash (`salt="chesslab_2026"`). Only `train` partition was filtered. Held-out reference shards (`val.bin`, `test.bin`) kept completely fixed and untouched.
+- **Pilot & 25k Shard Empirical Results** (`data/filtered_pipeline_25k.json`):
+  - Games scanned: 122,756; PRD filters rejected: 78,430; Non-train split skipped: 2,288.
+  - Candidate positions evaluated: 41,979.
+  - Kept positions ($\le 25$ cp): **25,000 (59.6% retention rate)** in `data/shards/train_filtered_25k.bin` (SHA-256: `124d26e5b0139a45276195fa6b1519dde02882114eaeced074729654af88da0d`).
+  - Blunders rejected ($> 25$ cp): **16,979 (40.4% blunder rate)**.
+  - Throughput: 128.7 evaluations/sec on single CPU thread in 326.2 seconds. Engine failures: 0.
+  - CPL Distribution: 0 cp (exact top engine move): 20,333 (48.4%); 1–10 cp: 1,758 (4.2%); 11–25 cp: 2,909 (6.9%); 26–50 cp: 4,632 (11.0%); 51–100 cp: 5,434 (12.9%); $>100$ cp: 6,913 (16.5%).
+- **Strictly Controlled Model Comparison (Filtered 25k vs Raw 25k Baseline)**:
+  - Identical initialization (seed 42), architecture (ChessResNet 6 blocks, 64 channels), optimizer (AdamW, lr $10^{-3} \to 3.3\times 10^{-7}$), batch size 128, 3 epochs.
+  - **Training Loss**: Filtered 25k achieved lower loss (**2.3684** vs 2.6519 for Raw 25k).
+  - **Validation Set (25,316 positions)**: Filtered Top-1: **22.76%** (+1.27% over Raw 21.49%), Top-5: **53.21%** (+1.16% over Raw 52.05%).
+  - **Held-Out Test Set (25,368 positions)** (`data/predictive_filtered_vs_raw_25k.json`):
+    - Raw 25k: Top-1 = **21.11%**, Top-5 = **52.07%**, Policy Loss = **2.8844**.
+    - Filtered 25k: Top-1 = **22.79%** (+1.68%), Top-5 = **53.44%** (+1.37%), Policy Loss = **2.8373** (-0.0471).
+  - **Tactical Puzzle Benchmark (1,000 rated Lichess puzzles)**:
+    - Raw 25k: Top-1 = **13.60%**, Top-3 = **30.50%**, Top-5 = **41.00%**, Mate-in-2 = **3.0%**.
+    - Filtered 25k: Top-1 = **13.80%** (+0.20%), Top-3 = **33.00%** (+2.50%), Top-5 = **42.90%** (+1.90%), Mate-in-2 = **8.0%** (+5.0%).
+  - **Head-to-Head Tournament Matches**:
+    - Searchless (20 games, color-swapped): **0 Wins, 20 Draws, 0 Losses** (Score: 50.0%, 0.0 Elo).
+    - Depth 1 (20 games, color-swapped, max 100 plies) (`data/match_filtered25k_vs_raw25k_d1.json`):
+      - Filtered 25k vs Raw 25k: **4 Wins, 8 Draws, 8 Losses** (Score: **40.0%**, Delta Elo: **-70.4 ± 122.9**).
+  - **Research Conclusion & Limitation**:
+    - **Predictive vs Playing Strength Divergence**: While blunder filtering clearly improves predictive imitation accuracy (+1.68% test Top-1) and reduces cross-entropy loss, it does **not** translate into an immediate head-to-head playing strength advantage at shallow search ($\Delta \text{Elo} = -70.4 \pm 122.9$, statistically indistinguishable from parity, $p > 0.05$).
+    - Filtering out human mistakes exposes the model to a narrower distribution of positions, potentially reducing its familiarity with sharp counter-blunder responses when opponents play unsound moves.
+
+---
+
 ## Active Status & Next Steps
 
 | Milestone / Experiment | Priority | Description | Status |
 |---|---|---|---|
 | **M8: Inference Search (1-3 Ply Alpha-Beta)** | High | Add lightweight search to ResNet; eliminated blunders (+147.2 Elo, 70% puzzle accuracy) | Completed |
-| **M9: Stockfish Calibration Ladder Benchmark** | High | Calibrate exact BayesElo against Stockfish at fixed node limits (200, 500, 1000, 2000 nodes) | In Progress |
-| **M10: Engine Blunder Filtering (Quality Gate)** | Medium | Filter human games by Stockfish centipawn loss ($\le 25$ cp) to train exclusively on sound master moves | Planned |
-| **M11: Data Scaling Curve (1M vs 3M vs 10M)** | Long-term | Compare whether scaling beyond 1M positions improves Elo or hits human imitation saturation | Planned |
+| **M9: Search Hardening & Metric Resolution** | High | Fixed TT halfmove/repetition/mate bugs (50 tests passing); resolved raw illegal rate | Completed |
+| **M10: Stockfish 16 Calibration Ladder** | High | 192-game pilot benchmark against Stockfish 16 (200-2000 nodes); verified node limits | Completed |
+| **M11: Engine Blunder Filtering (Quality Gate)** | High | Streamed 25k blunder-filtered shard ($\le 25$ cp); proved predictive gain does not imply playing strength gain | Completed |
+| **M12: Data Scaling Curve (1M vs 3M vs 10M)** | High | Compare whether scaling dataset from 1M to 3M games produces measurable playing strength gains | Next Action |
 

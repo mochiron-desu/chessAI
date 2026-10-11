@@ -25,16 +25,40 @@ MATE_SCORE = 100.0
 MATE_PLY_PENALTY = 0.1
 
 
+MATE_THRESHOLD = MATE_SCORE / 2.0
+
+
+def score_to_tt(score: float, ply: int) -> float:
+    """Converts a root-relative mate score to a node-relative score for TT storage."""
+    if score > MATE_THRESHOLD:
+        return score + ply * MATE_PLY_PENALTY
+    if score < -MATE_THRESHOLD:
+        return score - ply * MATE_PLY_PENALTY
+    return score
+
+
+def score_from_tt(score: float, ply: int) -> float:
+    """Converts a node-relative TT mate score back to a root-relative score at `ply`."""
+    if score > MATE_THRESHOLD:
+        return score - ply * MATE_PLY_PENALTY
+    if score < -MATE_THRESHOLD:
+        return score + ply * MATE_PLY_PENALTY
+    return score
+
+
 def get_position_key(board: chess.Board) -> Tuple[Any, ...]:
     """Generates a fast, robust, immutable tuple representing board state for transposition caching.
     
-    Includes piece positions, side to move, castling rights, and en passant square.
-    Does NOT include halfmove clock or fullmove number to maximize transposition hits.
+    Includes piece positions, side to move, castling rights, en passant square, and the
+    halfmove clock (fifty-move-rule state; also an input feature of the neural network).
+    Does NOT include fullmove number. Repetition history is path-dependent and is handled
+    separately: subtrees influenced by repetition draws are never stored in the TT.
     """
     return (
         board.turn,
         board.castling_rights,
         board.ep_square,
+        board.halfmove_clock,
         board.pawns,
         board.knights,
         board.bishops,
@@ -73,6 +97,8 @@ class AlphaBetaSearcher:
         self.nn_evals = 0
         self.cutoffs = 0
         self.tt_hits = 0
+        # Incremented whenever a path-dependent repetition draw score is returned.
+        self._rep_taint = 0
 
     def clear_caches(self):
         """Clears transposition table and neural network evaluation cache."""
@@ -168,24 +194,33 @@ class AlphaBetaSearcher:
             # Side to move has lost. Prefer slower losses and faster wins
             return -MATE_SCORE + ply * MATE_PLY_PENALTY, None
 
-        if board.is_stalemate() or board.is_insufficient_material() or board.can_claim_draw():
+        if board.is_stalemate() or board.is_insufficient_material():
             return 0.0, None
 
-        # Path-dependent repetition check (draw if repeated along current path)
-        if ply > 0 and board.is_repetition(2):
-            return 0.0, None
+        if ply > 0:
+            # Position-dependent (halfmove clock is in the TT key): fifty-move claim
+            if board.can_claim_fifty_moves():
+                return 0.0, None
+            # Path-dependent: repetition along current game/search path. Taint ancestors
+            # so their results are not stored as position-independent TT entries.
+            if board.is_repetition(2) or board.can_claim_threefold_repetition():
+                self._rep_taint += 1
+                return 0.0, None
 
         # 2. Leaf node (configured ply depth reached)
         if depth <= 0:
             return self.evaluate_leaf(board), None
 
         # 3. Transposition Table Lookup
+        alpha_orig = alpha
+        taint_start = self._rep_taint
         tt_key = get_position_key(board) if self.use_tt else None
         tt_move = None
         if self.use_tt and tt_key in self.tt:
-            tt_depth, tt_score, tt_flag, tt_best_mv = self.tt[tt_key]
+            tt_depth, tt_stored, tt_flag, tt_best_mv = self.tt[tt_key]
             tt_move = tt_best_mv
             if tt_depth >= depth:
+                tt_score = score_from_tt(tt_stored, ply)
                 self.tt_hits += 1
                 if tt_flag == TT_EXACT:
                     return tt_score, tt_best_mv
@@ -201,7 +236,6 @@ class AlphaBetaSearcher:
         if not ordered_moves:
             return 0.0, None
 
-        alpha_orig = alpha
         best_score = -float("inf")
         best_move = ordered_moves[0]
 
@@ -227,15 +261,15 @@ class AlphaBetaSearcher:
                     self.cutoffs += 1
                     break
 
-        # 6. Store in Transposition Table (only if not a path-repetition draw)
-        if self.use_tt:
+        # 6. Store in TT only if no repetition draw influenced this subtree
+        if self.use_tt and self._rep_taint == taint_start:
             if best_score <= alpha_orig:
                 flag = TT_UPPERBOUND
             elif best_score >= beta:
                 flag = TT_LOWERBOUND
             else:
                 flag = TT_EXACT
-            self.tt[tt_key] = (depth, best_score, flag, best_move)
+            self.tt[tt_key] = (depth, score_to_tt(best_score, ply), flag, best_move)
 
         return best_score, best_move
 
