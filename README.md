@@ -1,0 +1,84 @@
+# ChessLab: CPU-Native Chess AI Research Framework
+
+A reproducible, staged research framework for training chess-playing neural networks from scratch on PGN data, designed for local execution.
+
+## Key Features
+
+1. **CPU-Native Architecture**:
+   - Compact Residual Convolutional Neural Network (ResNet-6, ~550k–960k parameters).
+   - Tailored for modern Intel CPUs (AVX2 + VNNI + oneDNN).
+   - Training throughput: **>2,500 positions/second** on a single mobile Intel Core i5 CPU.
+2. **Zero-Disk-Overflow Streaming Pipeline**:
+   - Decompresses and streams games on the fly directly from Lichess `.pgn.zst` archives.
+   - Never downloads or uncompresses 30GB+ archives to disk.
+   - Extracts 1 random position per valid game (Maia methodology) to prevent opening memorization and intra-game autocorrelation.
+   - Compact binary representation: 12 bitboards + 7 rule scalars + move + WDL + legal mask in 346 bytes per sample (~35 MB per 100k positions).
+3. **Strict Legality & Perspective Invariance**:
+   - Board states and moves are dynamically flipped to the current player's perspective, ensuring symmetric learning between White and Black.
+   - Policy logits are strictly masked with `python-chess` legal moves ($-\infty$ on illegal moves).
+4. **Rigorous Evaluation Suite**:
+   - Offline predictive metrics: Top-1, Top-5 accuracy, cross-entropy, unmasked illegal move rate.
+   - Paired UCI match harness with color-swapped openings and BayesElo rating estimation with 95% confidence intervals.
+
+---
+
+## Directory Structure
+
+```text
+chessAI/
+├── src/chesslab/
+│   ├── encode/          # Board plane encodings & 1,880 UCI move vocabulary
+│   ├── models/          # Compact ResNet policy + value architecture
+│   ├── data/            # Streaming zstandard parser & memory-mapped dataset
+│   ├── inference/       # Legal move masking & UCI engine wrapper
+│   └── eval/            # Predictive evaluation & paired match tournament harness
+├── tests/               # Complete automated acceptance test suite (Gates 1–6)
+├── scripts/
+│   ├── run_1m_pipeline.py    # Streaming ingestion and sharding CLI
+│   ├── train.py              # CPU training engine CLI
+│   └── run_tournament.py     # Engine tournament and Elo estimation CLI
+├── data/
+│   ├── shards/          # Packed binary shards (train.bin, val.bin, test.bin)
+│   └── manifests/       # SHA-256 dataset provenance manifests
+└── checkpoints/         # Model weights and EMA checkpoints
+```
+
+---
+
+## Quickstart
+
+### 1. Run Acceptance Test Suite
+```bash
+PYTHONPATH=src .venv/bin/pytest tests/
+```
+All 26 tests verify bitboard encodings, perspective invariance, legal masking, split disjointness, 1-batch optimization overfit, checkpoint determinism, and UCI playout.
+
+### 2. Stream & Ingest Games
+Stream a slice of verified Lichess games directly into compact binary shards:
+```bash
+# Ingest 10,000 games (~3.5 MB shards)
+PYTHONPATH=src .venv/bin/python3 scripts/run_1m_pipeline.py --max-games 10000 --report-every 2000
+
+# Ingest full 1,000,000 games (~350 MB shards)
+PYTHONPATH=src .venv/bin/python3 scripts/run_1m_pipeline.py --max-games 1000000 --report-every 25000
+```
+
+### 3. Train ResNet Model
+```bash
+PYTHONPATH=src .venv/bin/python3 scripts/train.py \
+    --data-dir data/shards \
+    --epochs 5 \
+    --batch-size 128 \
+    --blocks 6 \
+    --channels 64 \
+    --lr 1e-3 \
+    --checkpoint-dir checkpoints
+```
+
+### 4. Run Tournament / UCI Match
+```bash
+PYTHONPATH=src .venv/bin/python3 scripts/run_tournament.py \
+    --engine-a-ckpt checkpoints/final_ema_model.pt \
+    --pairs 20 \
+    --max-plies 100
+```

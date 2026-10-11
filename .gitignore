@@ -1,0 +1,24 @@
+# Environments
+.venv/
+env/
+venv/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Data and Artifacts (never commit large data)
+/data/
+/checkpoints/
+*.pt
+*.bin
+*.pgn.zst
+*.parquet
+
+# IDE
+.vscode/
+.idea/
